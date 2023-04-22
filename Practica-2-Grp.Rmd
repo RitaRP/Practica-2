@@ -1,0 +1,194 @@
+---
+title: "Practica 2 - Datos Elegantes + Análisis de datos con Web Screpping"
+author: "Mayteelsoon Guerra - Rita Rosas"
+date: "2023-04-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Pregunta 1:
+
+### 1.1 Descargar la página web de la URL indicada, y almacenarlo en un formato de R apto para ser tratado
+
+```{r 1.1 Descarga pagina, echo = FALSE}
+library(XML) 
+library(httr)
+response <- GET("https://www.mediawiki.org/wiki/MediaWiki")
+status_code(response)
+content <- content(response, as = "text")
+```
+
+### 1.2 Analizar el contenido de la web, buscando el título de la página (que en HTML se etiqueta como “title”)
+
+```{r 1.2 Analizar, echo = FALSE}
+parsedHtml <- htmlParse(content, asText = TRUE)
+title <- xpathSApply(parsedHtml, "//title", xmlValue)
+print(title)
+```
+
+### 1.3 Analizar el contenido de la web, buscando todos los enlaces (que en HTML se etiquetan como “a”), buscando el texto  del enlace, así como la URL
+
+```{r 1.3 Analizar, echo = FALSE}
+links_text <- xpathSApply(parsedHtml, "//a", xmlValue)
+links_url <- xpathSApply(parsedHtml, "//a", xmlGetAttr, 'href')
+head(links_text)
+head(links_url)
+```
+
+### 1.4 Generar una tabla con cada enlace encontrado, indicando el texto que acompaña el enlace, y el número de veces que aparece un enlace con ese mismo objetivo.
+```{r 1.4 Generar tabla, echo = TRUE}
+tabla <- data.frame(links_text = character(),
+                    links_original_url = character(),
+                    links_url = character(),
+                    links_relative = character(),
+                    links_internal = character(),
+                    repeticiones = numeric(),
+                    scraps = character(),
+                    stringsAsFactors = FALSE)
+
+frecuencia <- table(links_url)
+```
+
+### 1.5 Para cada enlace, seguirlo e indicar si está activo (podemos usar el código de status HTTP al hacer una petición a esa URL) aparece un enlace con ese mismo objetivo.
+
+```{r 1.5 Enlaces activos, echo = FALSE}
+for (i in 1:length(links_text)) {
+  Sys.sleep(2)
+  #print("round done")
+  tabla[i, "links_text"] <- links_text[i]
+  tabla[i, "links_original_url"] <- links_url[i]
+  tabla[i, "links_url"] <- links_url[i]
+  tabla[i, "links_relative"] <- "N"
+  tabla[i, "links_internal"] <- "S"
+  tabla[i, "repeticiones"] <- frecuencia[links_url[i]]
+
+  #si inicia con /wiki/
+  validation_wiki <- startsWith(links_url[i], "/wiki/")
+  if(validation_wiki) {
+    tabla[i, "links_url"] <- paste0("https://www.mediawiki.org", links_url[i])
+    tabla[i, "links_relative"] <- "S"
+  }
+
+  #si inicia con /https/
+  validation_wiki <- startsWith(links_url[i], "https:")
+  if(validation_wiki) {
+    tabla[i, "links_url"] <- paste0("", links_url[i])
+
+    validation_internal <- startsWith(links_url[i], "https://www.mediawiki.org")
+    if(!validation_internal) {
+      tabla[i, "links_internal"] <- "N"
+    }
+  }
+
+  #si inicia con //
+  validation_wiki <- startsWith(links_url[i], "//")
+  if(validation_wiki) {
+    tabla[i, "links_url"] <- paste0("https:", links_url[i])
+    tabla[i, "links_relative"] <- "S"
+  }
+
+  #si inicia con /w/
+  validation_wiki <- startsWith(links_url[i], "/w/")
+  if(validation_wiki) {
+    tabla[i, "links_url"] <- paste0("https://www.mediawiki.org", links_url[i])
+    tabla[i, "links_relative"] <- "S"
+  }
+
+  #si inicia con /#/
+  validation_wiki <- startsWith(links_url[i], "#")
+  if(validation_wiki) {
+    tabla[i, "links_url"] <- paste0("https://www.mediawiki.org/wiki/MediaWiki", links_url[i])
+    tabla[i, "links_relative"] <- "S"
+  }
+
+  #obtencion de STATUS CODE
+  code <- status_code(HEAD(tabla[i, "links_url"]))
+  tabla[i, "scraps"] <- code
+}
+#para ver el contenido de todos los elementos, ver tabla
+#tabla
+head(tabla)
+```
+
+## Pregunta 2:
+
+### 2.1 Un histograma con la frecuencia de aparición de los enlaces, pero separado porURLs absolutas (con “http…”) y URLs relativas
+
+```{r 2.1 Grafico 1, echo = FALSE}
+library(ggplot2)
+library(ggpubr)
+
+relative <- tabla[tabla$links_relative =="S", c("repeticiones")]
+no_relative <- tabla[tabla$links_relative =="N", c("repeticiones")]
+
+# Crear el primer histograma
+p1 <- ggplot(data.frame(x=relative), aes(x=relative)) +
+     geom_histogram(binwidth = 0.5, fill="blue", alpha=0.5) +
+     labs(title="1.Histograma de relative", x="Valores", y="Frecuencia")
+           
+# Crear el segundo histograma
+p2 <- ggplot(data.frame(x=no_relative), aes(x=no_relative)) +
+  geom_histogram(aes(y=..count..), fill="red", alpha=0.5) +
+  labs(title="2.Histograma de no-relative", x="Valores", y="Frecuencia")
+
+# Ajustar la apariencia de los gráficos (opcional)
+theme_set(theme_classic())
+
+# Acomodar los gráficos en dos filas y una columna usando ggarrange()
+ggarrange(p1, p2, nrow = 1, ncol=2) #, heights=c(1,1.2))
+
+# Restaurar el tema por defecto de ggplot2 (opcional)
+theme_set(theme_gray())
+```
+
+### 2.2 Un gráfico de barras indicando la suma de enlaces que apuntan a otros dominios o servicios vs. la suma de los otros enlaces.
+
+```{r 2.2 Grafico 2, echo = FALSE}
+
+# Crear el tercer histograma
+tabla6 <- tabla[TRUE, c("links_internal")]
+factor_tabla6 <- factor(tabla6, levels = c("S", "N"))
+
+# Crear un data frame con la columna "x"
+data <- data.frame(x = factor_tabla6)
+
+# Crear el histograma
+p3 <- ggplot(data, aes(x = x)) +
+  geom_bar(aes(y=..count../sum(..count..)), fill="blue", alpha=0.5, stat = "count") +
+  labs(title="3.Histograma de dominios internos", x="Valores", y="Frecuencia")
+
+# Ajustar la apariencia de los gráficos (opcional)
+theme_set(theme_classic())
+
+# Acomodar los gráficos en dos filas y una columna usando ggarrange()
+ggarrange(p1, p2, p3, nrow = 2, ncol=2) #, heights=c(2,1,1.2))
+```
+
+
+### 2.3 Un gráfico de tarta (pie chart) indicando los porcentajes de Status de nuestro análisis.
+
+```{r 2.3 Grafico 3, echo = FALSE}
+
+# Crear el cuarto histograma
+tabla7 <- as.numeric(tabla[TRUE, c("scraps")])
+tabla7 <- (tabla[TRUE, c("scraps")])
+p4 <- ggplot(data.frame(x=tabla7), aes(x= "", fill = x)) +
+  geom_bar(width = 1) + coord_polar(theta = "y") +
+  labs(title="4. Status code")
+
+# Ajustar la apariencia de los gráficos (opcional)
+theme_set(theme_classic())
+
+# Acomodar los gráficos en dos filas y una columna usando ggarrange()
+ggarrange(p1, p2, p3, p4, nrow = 2, ncol=2 )  #,  heights=c(1,1,1,1.2))
+
+```
+
+
+
+
+
+
